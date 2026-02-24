@@ -46,15 +46,24 @@ async function evaluateState(state) {
   });
 }
 
-export async function solveCreativeWriting(seedSentences, beam = 5, maxDepth = 4) {
-  let frontier = [
-    {
-      paragraphs: [],
-      seedSentences: [...seedSentences],
-      path: [],
-      depth: 0,
-    },
-  ];
+export async function solveCreativeWriting(seedSentences, beam = 5, maxDepth = 4, onProgress = null) {
+  let nodeIdCounter = 0;
+  const nextId = () => String(++nodeIdCounter);
+  const emit = (event) => {
+    if (typeof onProgress === 'function') onProgress(event);
+  };
+
+  const root = {
+    paragraphs: [],
+    seedSentences: [...seedSentences],
+    path: [],
+    depth: 0,
+    id: '0',
+  };
+  let frontier = [root];
+
+  emit({ type: 'init', task: 'creativeWriting', payload: { sentences: seedSentences } });
+  emit({ type: 'node', id: '0', parentId: null, label: '(start)', depth: 0, data: { paragraphs: [] } });
 
   let bestPartial = null;
   let bestLength = -1;
@@ -69,6 +78,7 @@ export async function solveCreativeWriting(seedSentences, beam = 5, maxDepth = 4
     const currentLevel = frontier.slice(0, beam);
     frontier = frontier.slice(beam);
 
+    emit({ type: 'round', round });
     console.log(`\n${LOG_PREFIX} ┌── ROUND ${round} (expanding ${currentLevel.length} state(s)) ──`);
 
     for (const state of currentLevel) {
@@ -76,11 +86,13 @@ export async function solveCreativeWriting(seedSentences, beam = 5, maxDepth = 4
         const verdict = await evaluateState(state);
         if (verdict === 'sure') {
           console.log(`${LOG_PREFIX} ✓ SOLUTION: ${state.paragraphs.length} paragraphs complete`);
-          return {
+          const result = {
             success: true,
             solution: state.paragraphs.join('\n\n'),
             steps: state.paragraphs.length,
           };
+          emit({ type: 'solution', result });
+          return result;
         }
       }
 
@@ -92,21 +104,28 @@ export async function solveCreativeWriting(seedSentences, beam = 5, maxDepth = 4
       console.log(`${LOG_PREFIX} ── Expanding (depth ${state.depth}, ${state.paragraphs.length} paragraphs)`);
       const children = await generateNextThoughts(state);
 
-      for (const child of children) {
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const id = nextId();
+        emit({ type: 'node', id, parentId: state.id, label: child.thought, depth: state.depth + 1, data: { paragraphs: child.paragraphs, path: child.path } });
+
         const verdict = await evaluateState(child);
         const verdictIcon = verdict === 'sure' ? '✓' : verdict === 'impossible' ? '✗' : '?';
+        emit({ type: 'evaluate', nodeId: id, verdict });
+
         console.log(`${LOG_PREFIX}   Evaluate: "${child.thought}"  →  ${verdictIcon} ${verdict}`);
 
         if (verdict === 'impossible') {
+          emit({ type: 'prune', nodeId: id });
           console.log(`${LOG_PREFIX}      → pruned (impossible)`);
           continue;
         }
 
-        frontier.push({ ...child, depth: state.depth + 1 });
+        frontier.push({ ...child, depth: state.depth + 1, id });
         console.log(`${LOG_PREFIX}      → added to frontier`);
 
         if (verdict === 'sure' && child.paragraphs.length > bestLength) {
-          bestPartial = child;
+          bestPartial = { ...child, id };
           bestLength = child.paragraphs.length;
           console.log(`${LOG_PREFIX}      → new best partial (${child.paragraphs.length} paragraphs)`);
         }
@@ -120,18 +139,22 @@ export async function solveCreativeWriting(seedSentences, beam = 5, maxDepth = 4
   console.log(`\n${LOG_PREFIX} No full solution; frontier exhausted.`);
   if (bestPartial) {
     console.log(`${LOG_PREFIX} Best partial: ${bestPartial.paragraphs.length} paragraphs`);
-    return {
+    const result = {
       success: false,
       solution: bestPartial.paragraphs.join('\n\n') + `\n\n(best partial → ${bestPartial.paragraphs.length} paragraphs)`,
       steps: bestPartial.paragraphs.length,
       partial: true,
     };
+    emit({ type: 'solution', result });
+    return result;
   }
 
   console.log(`${LOG_PREFIX} No solution found within budget.`);
-  return {
+  const result = {
     success: false,
     solution: 'No solution found within budget',
     steps: 0,
   };
+  emit({ type: 'solution', result });
+  return result;
 }

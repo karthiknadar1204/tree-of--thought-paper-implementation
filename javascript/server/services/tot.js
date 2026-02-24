@@ -71,14 +71,23 @@ async function evaluateState(state) {
   });
 }
 
-export async function solveGameOf24(inputNumbers, beam = 5, maxDepth = 4) {
-  let frontier = [
-    {
-      numbers: [...inputNumbers].sort((a, b) => a - b),
-      path: [],
-      depth: 0,
-    },
-  ];
+export async function solveGameOf24(inputNumbers, beam = 5, maxDepth = 4, onProgress = null) {
+  let nodeIdCounter = 0;
+  const nextId = () => String(++nodeIdCounter);
+  const emit = (event) => {
+    if (typeof onProgress === 'function') onProgress(event);
+  };
+
+  const root = {
+    numbers: [...inputNumbers].sort((a, b) => a - b),
+    path: [],
+    depth: 0,
+    id: '0',
+  };
+  let frontier = [root];
+
+  emit({ type: 'init', task: 'game24', payload: { numbers: root.numbers } });
+  emit({ type: 'node', id: '0', parentId: null, label: `[${root.numbers.join(', ')}]`, depth: 0, data: { numbers: root.numbers } });
 
   let bestPartial = null;
   let bestLength = Infinity;
@@ -93,17 +102,20 @@ export async function solveGameOf24(inputNumbers, beam = 5, maxDepth = 4) {
     const currentLevel = frontier.slice(0, beam);
     frontier = frontier.slice(beam);
 
+    emit({ type: 'round', round });
     console.log(`\n${LOG_PREFIX} ┌── ROUND ${round} (expanding ${currentLevel.length} state(s)) ──`);
 
     for (const state of currentLevel) {
       // Solution found
       if (state.numbers.length === 1 && state.numbers[0] === 24) {
         console.log(`${LOG_PREFIX} ✓ SOLUTION FOUND: ${state.path.join(' → ')}`);
-        return {
+        const result = {
           success: true,
           solution: state.path.join('\n'),
           steps: state.path.length,
         };
+        emit({ type: 'solution', result });
+        return result;
       }
 
       if (state.depth >= maxDepth) {
@@ -114,14 +126,21 @@ export async function solveGameOf24(inputNumbers, beam = 5, maxDepth = 4) {
       console.log(`${LOG_PREFIX} ── Expanding state (depth ${state.depth}): ${stateLabel(state)}`);
       const children = await generateNextThoughts(state);
 
-      for (const child of children) {
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const id = nextId();
+        const stepResult = child.path[child.path.length - 1].split(' = ')[1];
+        const label = `${child.thought} = ${stepResult}`;
+        emit({ type: 'node', id, parentId: state.id, label, depth: state.depth + 1, data: { numbers: child.numbers, path: child.path } });
+
         const verdict = await evaluateState(child);
         const verdictIcon = verdict === 'sure' ? '✓' : verdict === 'impossible' ? '✗' : '?';
+        emit({ type: 'evaluate', nodeId: id, verdict });
 
-        const stepResult = child.path[child.path.length - 1].split(' = ')[1];
         console.log(`${LOG_PREFIX}   Evaluate: "${child.thought} = ${stepResult}"  →  [${child.numbers.join(', ')}]  →  ${verdictIcon} ${verdict}`);
 
         if (verdict === 'impossible') {
+          emit({ type: 'prune', nodeId: id });
           console.log(`${LOG_PREFIX}      → pruned (impossible)`);
           continue;
         }
@@ -129,11 +148,12 @@ export async function solveGameOf24(inputNumbers, beam = 5, maxDepth = 4) {
         frontier.push({
           ...child,
           depth: state.depth + 1,
+          id,
         });
         console.log(`${LOG_PREFIX}      → added to frontier`);
 
         if (verdict === 'sure' && child.numbers.length < bestLength) {
-          bestPartial = child;
+          bestPartial = { ...child, id };
           bestLength = child.numbers.length;
           console.log(`${LOG_PREFIX}      → new best partial (${child.numbers.length} number(s) left)`);
         }
@@ -149,18 +169,22 @@ export async function solveGameOf24(inputNumbers, beam = 5, maxDepth = 4) {
   console.log(`\n${LOG_PREFIX} No full solution; frontier exhausted.`);
   if (bestPartial) {
     console.log(`${LOG_PREFIX} Best partial: ${bestPartial.path.join(' → ')}  →  remaining [${bestPartial.numbers.join(', ')}]`);
-    return {
+    const result = {
       success: false,
       solution: bestPartial.path.join('\n') + `\n\n(best partial → ${bestPartial.numbers.join(', ')})`,
       steps: bestPartial.path.length,
       partial: true,
     };
+    emit({ type: 'solution', result });
+    return result;
   }
 
   console.log(`${LOG_PREFIX} No solution found within budget.`);
-  return {
+  const result = {
     success: false,
     solution: 'No solution found within budget',
     steps: 0,
   };
+  emit({ type: 'solution', result });
+  return result;
 }

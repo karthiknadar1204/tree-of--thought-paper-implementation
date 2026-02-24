@@ -9,5 +9,5 @@ sure       ← almost certain we can reach 24 soon
 maybe      ← possible, but uncertain
 impossible ← clearly cannot reach 24
 
-Your answer:
+Reply with exactly one word: sure, maybe, or impossible.
 `;

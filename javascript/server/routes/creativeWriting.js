@@ -1,8 +1,9 @@
 import express from 'express';
+import { solveCreativeWriting } from '../services/totCreativeWriting.js';
 
 const router = express.Router();
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { sentences } = req.body;
 
   if (!Array.isArray(sentences) || sentences.length !== 4) {
@@ -11,11 +12,13 @@ router.post('/', (req, res) => {
     });
   }
 
-  res.json({
-    status: 'ok',
-    message: 'Creative Writing (ToT) — stub',
-    received: { sentences },
-  });
+  try {
+    const result = await solveCreativeWriting(sentences, 5, 4);
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 export default router;

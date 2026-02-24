@@ -81,3 +81,31 @@ export function validateVerdictResponse(raw) {
   const verdict = parseVerdict(raw);
   return EvaluateVerdictSchema.parse(verdict);
 }
+
+// --- Creative Writing ---
+export const CreativeWritingStepSchema = z.object({
+  content: z.string().min(1),
+});
+const CreativeWritingResponseSchema = z.object({
+  steps: z.array(CreativeWritingStepSchema).max(5),
+});
+
+function parseCreativeWritingPropose(raw) {
+  const text = (raw ?? '').trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const data = JSON.parse(jsonMatch[0]);
+      const parsed = CreativeWritingResponseSchema.safeParse(data);
+      if (parsed.success) return parsed.data.steps;
+    } catch {
+      //
+    }
+  }
+  return [];
+}
+
+export function validateCreativeWritingProposeResponse(raw) {
+  const steps = parseCreativeWritingPropose(raw);
+  return z.array(CreativeWritingStepSchema).parse(steps);
+}
